@@ -9,6 +9,7 @@ from sqlalchemy import (
     Date,
     Integer,
     Interval,
+    Numeric,
     String,
     and_,
     asc,
@@ -29,7 +30,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Query, selectinload
 
 from app.database import DbSession
-from app.models import DataPointSeries, DataSource, EventRecord, SleepDetails, WorkoutDetails
+from app.models import DataPointSeries, DataSource, EventRecord, MealDetails, SleepDetails, WorkoutDetails
 from app.repositories.data_source_repository import DATA_SOURCE_FIELDS, DataSourceIdentity, DataSourceRepository
 from app.repositories.data_type_coverage_repository import data_type_coverage_repository
 from app.repositories.repositories import (
@@ -521,6 +522,37 @@ class EventRecordRepository(
             .one()
         )
         return int(row[0]), int(row[1]), int(row[2]), int(row[3]), row[4]
+
+    def get_meal_totals(
+        self, db_session: DbSession, query_params: EventRecordQueryParams, user_id: str
+    ) -> tuple[int, int, dict[str, Decimal]]:
+        """Meals, local days with a meal, and the sum of each nutrient code, over the matching meals."""
+        filters = self._record_filters(query_params.model_copy(update={"category": EventCategory.MEAL}), user_id)
+        local_date = cast(
+            EventRecord.start_datetime + cast(func.coalesce(EventRecord.zone_offset, "+00:00"), Interval),
+            Date,
+        )
+        count, days = (
+            db_session.query(func.count(EventRecord.id), func.count(func.distinct(local_date)))
+            .select_from(EventRecord)
+            .join(DataSource, EventRecord.data_source_id == DataSource.id)
+            .filter(and_(*filters))
+            .one()
+        )
+
+        # One row per (meal, nutrient) from the JSONB map, so each nutrient is summed in the database.
+        nutrient = func.jsonb_each(MealDetails.nutrients).table_valued("key", "value").alias("nutrient")
+        rows = (
+            db_session.query(nutrient.c.key, func.sum(cast(nutrient.c.value, Numeric)))
+            .select_from(EventRecord)
+            .join(DataSource, EventRecord.data_source_id == DataSource.id)
+            .join(MealDetails, MealDetails.record_id == EventRecord.id)
+            .join(nutrient, true())
+            .filter(and_(*filters), func.jsonb_typeof(nutrient.c.value) == "number")
+            .group_by(nutrient.c.key)
+            .all()
+        )
+        return int(count), int(days), {key: total for key, total in rows}
 
     def winning_sleep_record_ids(
         self,

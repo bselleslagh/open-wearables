@@ -36,3 +36,13 @@ export type MealPage = {
 		total_count: number | null;
 	};
 };
+
+/** Mirrors backend `MealTotals`: the period's meals, added up by the API. */
+export type MealTotalsResponse = {
+	count: number;
+	days_logged: number;
+	calories_kcal: number | null;
+	macros: Macros | null;
+	water_ml: number | null;
+	nutrients: Record<string, NutrientValue>;
+};

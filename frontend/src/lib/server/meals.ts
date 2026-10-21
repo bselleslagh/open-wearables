@@ -1,7 +1,7 @@
 import { apiDelete, apiGet } from './api';
-import { eventWindow } from './events';
+import { eventWindow, periodBounds } from './events';
 import type { Period } from '$lib/filters/period';
-import type { MealPage } from '$lib/meals/types';
+import type { MealPage, MealTotalsResponse } from '$lib/meals/types';
 
 export type MealQuery = { period: Period; provider?: string; cursor?: string; limit?: number };
 
@@ -15,6 +15,21 @@ export function fetchMeals(
 	if (cursor) params.set('cursor', cursor);
 
 	return apiGet<MealPage>(`/api/v1/users/${userId}/events/meals?${params}`, accessToken);
+}
+
+/** Every matching meal in the period, added up by the API rather than paged through. */
+export function fetchMealTotals(
+	userId: string,
+	accessToken: string,
+	{ period, provider = '' }: Pick<MealQuery, 'period' | 'provider'>
+): Promise<MealTotalsResponse> {
+	const params = periodBounds(period);
+	if (provider) params.set('provider', provider);
+
+	return apiGet<MealTotalsResponse>(
+		`/api/v1/users/${userId}/events/meals/totals?${params}`,
+		accessToken
+	);
 }
 
 export const deleteMeal = (userId: string, mealId: string, accessToken: string) =>

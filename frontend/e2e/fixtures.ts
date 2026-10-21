@@ -2198,3 +2198,26 @@ export const makeMeals = (query: URLSearchParams) => {
 	});
 	return cursorPage(matching, query);
 };
+
+/** What the totals endpoint adds up: every meal `makeMeals` would page through. */
+export const mealTotals = (query: URLSearchParams) => {
+	const all = makeMeals(new URLSearchParams({ ...Object.fromEntries(query), limit: '100000' }));
+	const sum = (pick: (meal: (typeof all.data)[number]) => number | null) =>
+		all.data.reduce((total, meal) => total + (pick(meal) ?? 0), 0);
+	const calories = sum((meal) => meal.calories_kcal);
+	return {
+		count: all.data.length,
+		days_logged: new Set(all.data.map((meal) => meal.timestamp.slice(0, 10))).size,
+		calories_kcal: all.data.length ? calories : null,
+		macros: all.data.length
+			? {
+					protein_g: sum((meal) => meal.macros.protein_g),
+					carbohydrates_g: sum((meal) => meal.macros.carbohydrates_g),
+					fat_g: sum((meal) => meal.macros.fat_g),
+					fiber_g: sum((meal) => meal.macros.fiber_g)
+				}
+			: null,
+		water_ml: null,
+		nutrients: {}
+	};
+};

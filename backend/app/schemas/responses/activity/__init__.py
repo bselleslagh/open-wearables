@@ -7,6 +7,7 @@ from .data_point_responses import (
 from .events import (
     Macros,
     Meal,
+    MealTotals,
     Measurement,
     MenstrualCycleRecord,
     NutrientValue,
@@ -48,6 +49,7 @@ __all__ = [
     "Workout",
     "WorkoutTotals",
     "Meal",
+    "MealTotals",
     "Macros",
     "NutrientValue",
     "Measurement",

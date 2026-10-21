@@ -8,6 +8,7 @@ from app.schemas.enums import EventCategory, ProviderName, WorkoutType
 from app.schemas.model_crud.activities import EventRecordQueryParams, SleepInclude, WorkoutInclude
 from app.schemas.responses.activity import (
     Meal,
+    MealTotals,
     MenstrualCycleRecord,
     SleepSession,
     SleepTotals,
@@ -236,6 +237,34 @@ def list_meals(
         data_source_id=data_source_id,
     )
     return event_record_service.get_meals(db, user_id, params)
+
+
+@router.get("/users/{user_id}/events/meals/totals")
+def get_meal_totals(
+    user_id: UUID,
+    start_date: DateTimeQueryParam,
+    end_date: DateTimeQueryParam,
+    db: DbSession,
+    _api_key: ApiKeyDep,
+    provider: ProviderName | None = None,
+    source: str | None = None,
+    device_model: str | None = None,
+    data_source_id: UUID | None = None,
+) -> MealTotals:
+    """Returns the count, logged days and summed nutrients of the meals the same filters would list.
+
+    Added up in the database, so it covers every matching meal however many
+    there are, without paging through them.
+    """
+    params = EventRecordQueryParams(
+        start_datetime=parse_query_datetime(start_date),
+        end_datetime=parse_query_end_datetime(end_date),
+        provider=provider,
+        source=source,
+        device_model=device_model,
+        data_source_id=data_source_id,
+    )
+    return event_record_service.get_meal_totals(db, user_id, params)
 
 
 @router.delete("/users/{user_id}/events/workouts/{workout_id}", status_code=status.HTTP_204_NO_CONTENT)

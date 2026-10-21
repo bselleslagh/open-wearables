@@ -50,6 +50,7 @@ from app.schemas.model_crud.activities.zones import HRZones, PowerZones
 from app.schemas.responses.activity import (
     Macros,
     Meal,
+    MealTotals,
     MenstrualCycleRecord,
     NutrientValue,
     SleepSession,
@@ -1158,6 +1159,20 @@ class EventRecordService(
                 start_time=params.start_datetime,
                 end_time=params.end_datetime,
             ),
+        )
+
+    @handle_exceptions
+    def get_meal_totals(self, db_session: DbSession, user_id: UUID, params: EventRecordQueryParams) -> MealTotals:
+        count, days, sums = self.crud.get_meal_totals(db_session, params, str(user_id))
+        nutrients = {SeriesType(code): float(total) for code, total in sums.items() if code in SeriesType.__members__}
+        calories_kcal, macros, water_ml = _meal_summary(nutrients)
+        return MealTotals(
+            count=count,
+            days_logged=days,
+            calories_kcal=calories_kcal,
+            macros=macros,
+            water_ml=water_ml,
+            nutrients=_nutrient_values(nutrients),
         )
 
     @handle_exceptions

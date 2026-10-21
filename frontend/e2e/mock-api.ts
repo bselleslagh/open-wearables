@@ -64,6 +64,7 @@ import {
 	deleteWorkout,
 	makeCycles,
 	makeMeals,
+	mealTotals,
 	deleteMeal,
 	resetMeals,
 	makeScores,
@@ -624,6 +625,8 @@ const server = Bun.serve({
 					);
 				case '/events/meals':
 					return json(makeMeals(new URL(request.url).searchParams));
+				case '/events/meals/totals':
+					return json(mealTotals(new URL(request.url).searchParams));
 				case '/events/sleep':
 					return json(makeSleep(new URL(request.url).searchParams));
 				case '/events/sleep/totals':

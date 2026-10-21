@@ -93,6 +93,27 @@ class Meal(BaseModel):
     )
 
 
+class MealTotals(BaseModel):
+    """Meals matching a filter, added up in the database rather than paged."""
+
+    count: int = Field(..., description="Meals that match the filters", example=63)
+    days_logged: int = Field(
+        ...,
+        description="Distinct local dates with at least one meal, by each meal's zone offset (UTC when it has none)",
+        example=21,
+    )
+    calories_kcal: float | None = Field(
+        None, description="Sum of dietary energy; null when no meal reported any", example=37310.0
+    )
+    macros: Macros | None = Field(None, description="Sum of each macronutrient; null when no meal reported any")
+    water_ml: float | None = Field(None, description="Sum of water logged with the meals; null when none was")
+    nutrients: dict[str, NutrientValue] = Field(
+        default_factory=dict,
+        description="Sum of every nutrient the meals recorded, keyed by series type (e.g. dietary_sugar)",
+        example={"dietary_sugar": {"value": 412.5, "unit": "g"}},
+    )
+
+
 class Measurement(BaseModel):
     id: UUID
     type: Literal["weight", "blood_pressure", "body_composition", "temperature", "blood_glucose"]

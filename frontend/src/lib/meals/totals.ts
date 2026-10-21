@@ -1,24 +1,22 @@
-import { isPartial, sumOf } from '$lib/events/totals';
-import type { Meal } from './types';
+import type { MealTotalsResponse } from './types';
 
 export type MealTotals = {
 	count: number;
 	calories: number | null;
-	/** A meal carries no zone offset, so these are UTC days. */
+	/** Over the local days that have a meal, by each meal's zone offset. */
 	caloriesPerDay: number | null;
 	protein: number | null;
+	/** Always false: the database adds up every matching meal, not a page of them. */
 	partial: boolean;
 };
 
-export function sumMeals(meals: Meal[], total: number | null, hasMore: boolean): MealTotals {
-	const calories = sumOf(meals, (meal) => meal.calories_kcal);
-	const days = new Set(meals.map((meal) => meal.timestamp.slice(0, 10))).size;
-
-	return {
-		count: total ?? meals.length,
-		calories,
-		caloriesPerDay: calories === null ? null : calories / days,
-		protein: sumOf(meals, (meal) => meal.macros?.protein_g),
-		partial: isPartial(hasMore)
-	};
-}
+export const toMealTotals = (totals: MealTotalsResponse): MealTotals => ({
+	count: totals.count,
+	calories: totals.calories_kcal,
+	caloriesPerDay:
+		totals.calories_kcal === null || totals.days_logged === 0
+			? null
+			: totals.calories_kcal / totals.days_logged,
+	protein: totals.macros?.protein_g ?? null,
+	partial: false
+});

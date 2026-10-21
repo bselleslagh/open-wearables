@@ -3,6 +3,7 @@ Tests for the event totals endpoints, which add up what the lists page through:
 
 - GET /api/v1/users/{user_id}/events/workouts/totals
 - GET /api/v1/users/{user_id}/events/sleep/totals
+- GET /api/v1/users/{user_id}/events/meals/totals
 """
 
 from datetime import datetime, timedelta, timezone
@@ -16,6 +17,7 @@ from tests.factories import (
     ApiKeyFactory,
     DataSourceFactory,
     EventRecordFactory,
+    MealDetailsFactory,
     SleepDetailsFactory,
     UserFactory,
     WorkoutDetailsFactory,
@@ -132,4 +134,71 @@ class TestSleepTotals:
             "sleep_duration_seconds": 0,
             "time_in_bed_seconds": 0,
             "avg_efficiency_percent": None,
+        }
+
+
+class TestMealTotals:
+    """GET /users/{user_id}/events/meals/totals adds up the nutrients of the meals the list returns."""
+
+    def _totals(self, client: TestClient, user_id: object, **extra: object) -> dict:
+        return _get(client, f"/api/v1/users/{user_id}/events/meals/totals", **extra)
+
+    def test_adds_up_every_nutrient_of_the_meals_the_list_returns(self, client: TestClient, db: Session) -> None:
+        user = UserFactory()
+        apple = DataSourceFactory(user=user, provider=ProviderName.APPLE)
+        google = DataSourceFactory(user=user, provider=ProviderName.GOOGLE_HEALTH)
+        yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+        for ds, at, nutrients in (
+            (apple, yesterday, {"dietary_energy_consumed": 420.5, "dietary_protein": 14, "dietary_sugar": 12.5}),
+            (apple, yesterday, {"dietary_energy_consumed": 610, "dietary_protein": 42, "dietary_fat_total": 31}),
+            (google, yesterday - timedelta(days=2), {"dietary_carbohydrates": 22, "hydration": 250}),
+        ):
+            meal = EventRecordFactory(mapping=ds, category="meal", type_="food", start_datetime=at)
+            MealDetailsFactory(event_record=meal, nutrients=nutrients)
+        # Not a meal, and another user's meal: neither counts.
+        EventRecordFactory(mapping=apple, category="workout", duration_seconds=1800)
+        MealDetailsFactory(
+            event_record=EventRecordFactory(mapping=DataSourceFactory(), category="meal"),
+            nutrients={"dietary_energy_consumed": 999},
+        )
+
+        assert self._totals(client, user.id) == {
+            "count": 3,
+            "days_logged": 2,
+            "calories_kcal": 1030.5,
+            "macros": {"protein_g": 56.0, "carbohydrates_g": 22.0, "fat_g": 31.0, "fiber_g": None},
+            "water_ml": 250.0,
+            "nutrients": {
+                "dietary_energy_consumed": {"value": 1030.5, "unit": "kcal"},
+                "dietary_protein": {"value": 56.0, "unit": "g"},
+                "dietary_sugar": {"value": 12.5, "unit": "g"},
+                "dietary_fat_total": {"value": 31.0, "unit": "g"},
+                "dietary_carbohydrates": {"value": 22.0, "unit": "g"},
+                "hydration": {"value": 250.0, "unit": "mL"},
+            },
+        }
+        # The list's own filters narrow it the same way.
+        assert self._totals(client, user.id, provider="google_health")["calories_kcal"] is None
+        assert self._totals(client, user.id, provider="apple")["days_logged"] == 1
+        assert self._totals(client, user.id)["count"] == len(_listed(client, user.id, "meals"))
+
+    def test_counts_days_by_the_meal_local_date(self, client: TestClient, db: Session) -> None:
+        user = UserFactory()
+        ds = DataSourceFactory(user=user)
+        late_dinner = (datetime.now(timezone.utc) - timedelta(days=3)).replace(hour=23, minute=30)
+        # 23:30 UTC is 01:30 the next day at +02:00, the same local date as the 10:30 breakfast after it.
+        for at in (late_dinner, late_dinner + timedelta(hours=9)):
+            meal = EventRecordFactory(mapping=ds, category="meal", start_datetime=at, zone_offset="+02:00")
+            MealDetailsFactory(event_record=meal, nutrients={"dietary_energy_consumed": 500})
+
+        assert self._totals(client, user.id)["days_logged"] == 1
+
+    def test_is_zero_with_nothing_to_add(self, client: TestClient, db: Session) -> None:
+        assert self._totals(client, UserFactory().id) == {
+            "count": 0,
+            "days_logged": 0,
+            "calories_kcal": None,
+            "macros": None,
+            "water_ml": None,
+            "nutrients": {},
         }

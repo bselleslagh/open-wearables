@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { openapiEnum } from '$lib/testing/openapi';
 import { mealTitle } from './meal';
 import { macroEnergy, NUTRIENT_GROUPS, nutrientGroups, nutrientLabel } from './nutrients';
-import { sumMeals } from './totals';
-import type { Meal } from './types';
+import { toMealTotals } from './totals';
+import type { Meal, MealTotalsResponse } from './types';
 
 const meal = (over: Partial<Meal> = {}): Meal => ({
 	id: 'm1',
@@ -77,19 +77,19 @@ describe('mealTitle', () => {
 	});
 });
 
-describe('sumMeals', () => {
-	it('adds calories and protein, and averages calories over the days that have meals', () => {
-		const totals = sumMeals(
-			[
-				meal(),
-				meal({ id: 'm2', calories_kcal: 600 }),
-				meal({ id: 'm3', timestamp: '2026-10-06T12:00:00Z', calories_kcal: null, macros: null })
-			],
-			3,
-			false
-		);
+describe('toMealTotals', () => {
+	const totals = (over: Partial<MealTotalsResponse> = {}): MealTotalsResponse => ({
+		count: 3,
+		days_logged: 2,
+		calories_kcal: 1020,
+		macros: { protein_g: 28, carbohydrates_g: 90, fat_g: 40, fiber_g: null },
+		water_ml: null,
+		nutrients: {},
+		...over
+	});
 
-		expect(totals).toEqual({
+	it('takes the sums as the API added them up, averaging calories over the days logged', () => {
+		expect(toMealTotals(totals())).toEqual({
 			count: 3,
 			calories: 1020,
 			caloriesPerDay: 510,
@@ -98,7 +98,9 @@ describe('sumMeals', () => {
 		});
 	});
 
-	it('says the figures are partial when the page held meals back', () => {
-		expect(sumMeals([], null, true)).toMatchObject({ count: 0, calories: null, partial: true });
+	it('says nothing per day, or of protein, when no meal reported them', () => {
+		expect(
+			toMealTotals(totals({ count: 0, days_logged: 0, calories_kcal: null, macros: null }))
+		).toMatchObject({ count: 0, calories: null, caloriesPerDay: null, protein: null });
 	});
 });
