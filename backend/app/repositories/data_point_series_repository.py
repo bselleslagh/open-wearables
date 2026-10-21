@@ -50,6 +50,7 @@ from app.repositories.repositories import (
 from app.schemas.data_type_coverage import CoverageSpan
 from app.schemas.enums import (
     BUCKET_SIZES,
+    NUTRIENT_SERIES_TYPES,
     AggregationMethod,
     ProviderName,
     Resolution,
@@ -205,6 +206,8 @@ _TYPE_IDS_BY_METHOD: dict[AggregationMethod, frozenset[int]] = {
     for method in _AGGREGATE_FUNCS
     if method is not AggregationMethod.AVG
 }
+# Intake series ids, whose same-instant samples add up instead of replacing each other.
+_NUTRIENT_SERIES_TYPE_IDS: frozenset[int] = frozenset(get_series_type_id(t) for t in NUTRIENT_SERIES_TYPES)
 
 
 # Rows per avg HR query; 5 bind parameters each keeps a query far below PostgreSQL's 65535
@@ -344,10 +347,25 @@ class DataPointSeriesRepository(
             )
 
         # Dedup within the batch: PostgreSQL cannot upsert the same row twice in one
-        # statement. Keep the last value for each conflicting key.
+        # statement. Keep the last value for each conflicting key - except intake samples
+        # that carry their own ids: two meals logged at the same instant are two entries,
+        # so their amounts add up, each id counted once. Across uploads the later value
+        # still replaces the stored one, so resending a batch stays idempotent.
         deduped: dict[tuple[UUID, int, datetime], DataPointSeriesRepository._StagingRow] = {}
+        intake: dict[tuple[UUID, int, datetime], dict[str, Decimal | float | int]] = {}
         for row in rows:
-            deduped[(row.data_source_id, row.series_type_definition_id, row.recorded_at)] = row
+            key = (row.data_source_id, row.series_type_definition_id, row.recorded_at)
+            if row.external_id is None or row.series_type_definition_id not in _NUTRIENT_SERIES_TYPE_IDS:
+                intake.pop(key, None)
+                deduped[key] = row
+                continue
+            entries = intake.setdefault(key, {})
+            entries[row.external_id] = row.value
+            deduped[key] = row._replace(
+                value=sum((Decimal(str(value)) for value in entries.values()), Decimal(0)),
+                # The smallest id, so the merged row is the same whatever order the samples came in.
+                external_id=min(entries),
+            )
         return list(deduped.values()), owners
 
     def _insert_data_points(

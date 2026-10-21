@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.constants.series_types.sdk import get_series_type_from_metric_type
 from app.models import DataPointSeries, DataSource, EventRecord, MealDetails, WorkoutDetails
-from app.schemas.enums import SeriesType
+from app.schemas.enums import SeriesType, get_series_type_from_id
 from app.schemas.model_crud.activities import EventRecordQueryParams
 from app.schemas.providers.mobile_sdk import SyncRequest as SDKSyncRequest
 from app.services.event_record_service import event_record_service
@@ -1169,6 +1169,121 @@ class TestSDKImportMealCorrelation:
 
         assert db.query(MealDetails).one().nutrients == {}
         assert [s.external_id for s in self._user_samples(db, user.id)] == ["hr-1"]
+
+
+class TestSDKImportSameInstantIntake:
+    """Loose intake samples that share an instant are separate entries (two meals logged at
+    12:00), so they add up; any other series still keeps one value per instant."""
+
+    ENERGY = "HKQuantityTypeIdentifierDietaryEnergyConsumed"
+    PROTEIN = "HKQuantityTypeIdentifierDietaryProtein"
+
+    @pytest.fixture
+    def import_service(self) -> ImportService:
+        return ImportService(log=logging.getLogger("test"))
+
+    @staticmethod
+    def _load(db: Session, import_service: ImportService, user_id: UUID, records: list[dict[str, Any]]) -> Any:
+        payload = {
+            "provider": "apple",
+            "sdkVersion": "1.2.0",
+            "syncTimestamp": "2026-09-18T12:00:00Z",
+            "data": {"records": records},
+        }
+        return import_service.load_data(db, payload, str(user_id))
+
+    @staticmethod
+    def _values(db: Session, user_id: UUID) -> dict[str, list[float]]:
+        """Stored values per series, for one user."""
+        values: dict[str, list[float]] = {}
+        for sample in db.query(DataPointSeries).join(DataSource).filter(DataSource.user_id == user_id):
+            series = get_series_type_from_id(sample.series_type_definition_id).value
+            values.setdefault(series, []).append(float(sample.value))
+        return values
+
+    @staticmethod
+    def _loose(external_id: str | None, metric_type: str, value: float, unit: str) -> dict[str, Any]:
+        """A record with no parentId, all at the same instant from the same app."""
+        return {
+            "id": external_id,
+            "type": metric_type,
+            "value": value,
+            "unit": unit,
+            "startDate": "2026-09-18T12:00:00Z",
+            "endDate": "2026-09-18T12:00:00Z",
+            "source": {"name": "MyFitnessPal", "bundleIdentifier": "com.myfitnesspal.mfp"},
+        }
+
+    def test_intake_logged_at_one_instant_adds_up(self, db: Session, import_service: ImportService) -> None:
+        user = UserFactory()
+        self._load(
+            db,
+            import_service,
+            user.id,
+            [
+                self._loose("breakfast-kcal", self.ENERGY, 520, "Cal"),
+                self._loose("lunch-kcal", self.ENERGY, 610, "Cal"),
+                self._loose("breakfast-protein", self.PROTEIN, 30, "g"),
+                self._loose("lunch-protein", self.PROTEIN, 42, "g"),
+            ],
+        )
+
+        assert self._values(db, user.id) == {"dietary_energy_consumed": [1130.0], "dietary_protein": [72.0]}
+
+    def test_a_sample_sent_twice_counts_once_and_a_resent_batch_changes_nothing(
+        self, db: Session, import_service: ImportService
+    ) -> None:
+        user = UserFactory()
+        records = [
+            self._loose("breakfast-kcal", self.ENERGY, 520, "Cal"),
+            self._loose("breakfast-kcal", self.ENERGY, 520, "Cal"),
+            self._loose("lunch-kcal", self.ENERGY, 610, "Cal"),
+        ]
+        self._load(db, import_service, user.id, records)
+        again = self._load(db, import_service, user.id, list(reversed(records)))
+
+        assert self._values(db, user.id) == {"dietary_energy_consumed": [1130.0]}
+        assert again["records_inserted"] == 0
+
+    def test_intake_without_ids_keeps_the_last_value(self, db: Session, import_service: ImportService) -> None:
+        """Without ids a resent sample and a second entry look the same, so nothing is added up."""
+        user = UserFactory()
+        self._load(
+            db,
+            import_service,
+            user.id,
+            [self._loose(None, self.ENERGY, 520, "Cal"), self._loose(None, self.ENERGY, 610, "Cal")],
+        )
+
+        assert self._values(db, user.id) == {"dietary_energy_consumed": [610.0]}
+
+    def test_other_series_at_one_instant_keep_the_last_value(self, db: Session, import_service: ImportService) -> None:
+        user = UserFactory()
+        self._load(
+            db,
+            import_service,
+            user.id,
+            [
+                self._loose("hr-1", "HKQuantityTypeIdentifierHeartRate", 70, "count/min"),
+                self._loose("hr-2", "HKQuantityTypeIdentifierHeartRate", 75, "count/min"),
+            ],
+        )
+
+        assert self._values(db, user.id) == {"heart_rate": [75.0]}
+
+    def test_meal_title_falls_back_to_the_healthkit_food_type_key(
+        self, db: Session, import_service: ImportService
+    ) -> None:
+        """Clients forwarding HealthKit metadata unchanged send the food name as HKFoodType."""
+        user = UserFactory()
+        raw = TestSDKImportMealCorrelation._correlation_record("MEAL-RAW")
+        raw["metadata"] = {"HKFoodType": "Chicken salad"}
+        both = TestSDKImportMealCorrelation._correlation_record("MEAL-BOTH")
+        both["metadata"] = {"title": "Kurczak z ryżem", "HKFoodType": "Chicken"}
+        self._load(db, import_service, user.id, [raw, both])
+
+        titles = {meal.external_id: meal.meal_detail.title for meal in db.query(EventRecord).all()}
+        assert titles == {"MEAL-RAW": "Chicken salad", "MEAL-BOTH": "Kurczak z ryżem"}
 
 
 class TestSDKImportAndroidFoodCorrelation:

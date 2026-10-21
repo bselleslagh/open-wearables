@@ -173,6 +173,90 @@ The `types` parameter in the timeseries endpoint accepts the following values:
 | `nike_fuel` | count | Nike Fuel |
 | `hydration` | mL | Hydration |
 
+### Nutrition
+
+Intake logged in food apps. These are the label nutrients; vitamins, minerals and caffeine follow the same `dietary_*` pattern (the [Provider Coverage Matrix](/providers/coverage) lists all of them, with the providers that send each).
+
+| Type | Unit | Description |
+|------|------|-------------|
+| `dietary_energy_consumed` | kcal | Energy eaten |
+| `dietary_protein` | g | Protein |
+| `dietary_carbohydrates` | g | Carbohydrates |
+| `dietary_fat_total` | g | Total fat |
+| `dietary_fat_saturated` | g | Saturated fat |
+| `dietary_fiber` | g | Fiber |
+| `dietary_sugar` | g | Sugar |
+| `dietary_cholesterol` | mg | Cholesterol |
+| `dietary_sodium` | mg | Sodium |
+| `dietary_potassium` | mg | Potassium |
+
+---
+
+## Nutrition: Meals and Loose Samples
+
+Nutrition is stored in one of two places, never both:
+
+- **Meals.** A food entry with its nutrients (a HealthKit `HKCorrelationTypeIdentifierFood` correlation, a Health Connect `NutritionRecord`, a Google Health food log) becomes a meal, read from [`GET /users/{user_id}/events/meals`](/api-reference/external:-events/list-meals). Its nutrients live on the meal and are not timeseries samples.
+- **Loose samples.** A nutrient sample that belongs to no food entry is a `dietary_*` (or `hydration`) timeseries sample. Two such samples of one type, from one source, at the same instant are two entries, so they add up: each sample id counts once, so sending the same sample again does not change the total. Samples without an id keep one value per instant.
+
+A day's intake is therefore its meals plus its loose samples.
+
+### Sending nutrition through the SDK sync endpoint
+
+Clients that post HealthKit data to [`POST /api/v1/sdk/users/{user_id}/sync`](/api-reference/external:-mobile-sdk/sync-sdk-data) themselves send nutrition as ordinary `records`. A food correlation is one record of type `HKCorrelationTypeIdentifierFood`, followed by its nutrient samples, each with `parentId` set to the correlation's `id`:
+
+```json
+{
+  "provider": "apple",
+  "sdkVersion": "1.0.0",
+  "syncTimestamp": "2026-10-20T10:05:00Z",
+  "data": {
+    "records": [
+      {
+        "id": "6F1C2D3E-0000-4000-8000-000000000001",
+        "type": "HKCorrelationTypeIdentifierFood",
+        "startDate": "2026-10-20T10:00:00Z",
+        "endDate": "2026-10-20T10:00:00Z",
+        "zoneOffset": "+02:00",
+        "source": { "name": "MyFitnessPal", "bundleIdentifier": "com.myfitnesspal.mfp" },
+        "metadata": { "HKFoodType": "Chicken salad", "mealType": "lunch" },
+        "value": 1,
+        "unit": null
+      },
+      {
+        "id": "6F1C2D3E-0000-4000-8000-000000000002",
+        "parentId": "6F1C2D3E-0000-4000-8000-000000000001",
+        "type": "HKQuantityTypeIdentifierDietaryEnergyConsumed",
+        "startDate": "2026-10-20T10:00:00Z",
+        "endDate": "2026-10-20T10:00:00Z",
+        "zoneOffset": "+02:00",
+        "source": { "name": "MyFitnessPal", "bundleIdentifier": "com.myfitnesspal.mfp" },
+        "value": 610,
+        "unit": "kcal"
+      },
+      {
+        "id": "6F1C2D3E-0000-4000-8000-000000000003",
+        "parentId": "6F1C2D3E-0000-4000-8000-000000000001",
+        "type": "HKQuantityTypeIdentifierDietaryProtein",
+        "startDate": "2026-10-20T10:00:00Z",
+        "endDate": "2026-10-20T10:00:00Z",
+        "zoneOffset": "+02:00",
+        "source": { "name": "MyFitnessPal", "bundleIdentifier": "com.myfitnesspal.mfp" },
+        "value": 42,
+        "unit": "g"
+      }
+    ]
+  }
+}
+```
+
+- **Identifiers.** Use the HealthKit identifier as `type`: `HKQuantityTypeIdentifierDietaryEnergyConsumed`, `...DietaryProtein`, `...DietaryCarbohydrates`, `...DietaryFatTotal`, `...DietaryFiber`, `...DietarySugar`, and so on for every `HKQuantityTypeIdentifierDietary*` type; `HKQuantityTypeIdentifierDietaryWater` is stored as `hydration`.
+- **Units.** Send each value in the unit of its series above: energy in kcal (`"kcal"` or `"Cal"`), macros in `g`, the rest in `mg` or `mcg`. Only two units are converted: water in `L` (to mL) and energy labelled `cal`, a small calorie (to kcal). Kilojoules are not converted, so convert them on the device.
+- **One upload per meal.** The correlation and its nutrient records go in the same request. A nutrient record whose correlation is not in that request is stored as a loose sample.
+- **Each sample once.** HealthKit also returns a correlation's nutrient samples from a plain query on their quantity type. Leave those out of loose uploads: a sample sent both inside its meal and on its own is counted twice.
+- **Ids.** Send the HealthKit sample UUID as `id` on every record. Meals are unique by the correlation's `id`, so several meals can share one time window, and resending a meal updates it in place.
+- **Name and meal type.** The meal's name comes from metadata `title`, or HealthKit's own `HKFoodType` key; its type from `mealType`.
+
 ---
 
 ## Workout Types

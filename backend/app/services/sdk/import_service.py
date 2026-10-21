@@ -21,7 +21,7 @@ from app.constants.series_types.sdk import (
 from app.constants.workout_types import get_unified_sdk_workout_type
 from app.database import DbSession
 from app.repositories.user_connection_repository import UserConnectionRepository
-from app.schemas.enums import DeviceType, EventCategory, SeriesType, daily_total_flag
+from app.schemas.enums import NUTRIENT_SERIES_TYPES, DeviceType, EventCategory, SeriesType, daily_total_flag
 from app.schemas.model_crud.activities import (
     EventRecordCreate,
     EventRecordDetailCreate,
@@ -61,9 +61,9 @@ _KCAL_SERIES = frozenset({SeriesType.dietary_energy_consumed, SeriesType.dietary
 
 MEAL_CORRELATION_TYPES = frozenset({"HKCorrelationTypeIdentifierFood", "FOOD"})
 
-MEAL_NUTRIENT_SERIES_TYPES = frozenset(
-    {st for st in SeriesType if st.value.startswith("dietary_")} | {SeriesType.hydration}
-)
+# HealthKit's own metadata key for a food's name (HKMetadataKeyFoodType). The iOS SDK sends
+# it as "title"; clients that forward HealthKit metadata as-is send it under this key.
+HK_FOOD_TYPE_METADATA_KEY = "HKFoodType"
 
 _SDK_ITEM_MODELS = (("records", MetricRecord), ("sleep", SleepRecord), ("workouts", Workout))
 
@@ -261,7 +261,7 @@ class ImportService:
                 nutrients[sample.series_type] = nutrients.get(sample.series_type, 0.0) + float(sample.value)
             detail = MealDetailCreate(
                 record_id=meal_id,
-                title=metadata.get("title"),
+                title=metadata.get("title") or metadata.get(HK_FOOD_TYPE_METADATA_KEY),
                 meal_type=metadata.get("mealType"),
                 nutrients=nutrients,
             )
@@ -474,7 +474,7 @@ class ImportService:
             if (
                 rjson.parentId is not None
                 and rjson.parentId in meal_external_ids
-                and get_series_type_from_metric_type(rjson.type or "") in MEAL_NUTRIENT_SERIES_TYPES
+                and get_series_type_from_metric_type(rjson.type or "") in NUTRIENT_SERIES_TYPES
             ):
                 nutrient_records.setdefault(rjson.parentId, []).append(rjson)
             else:

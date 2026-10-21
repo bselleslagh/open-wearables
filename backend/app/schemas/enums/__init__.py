@@ -22,6 +22,7 @@ from .provider import (
 )
 from .sdk_connection_outcome import SdkConnectionOutcome
 from .series_types import (
+    NUTRIENT_SERIES_TYPES,
     SERIES_TYPE_DEFINITIONS,
     SERIES_TYPE_ID_BY_ENUM,
     SeriesType,
@@ -52,6 +53,7 @@ __all__ = [
     "EntrySource",
     "EventCategory",
     "SeriesType",
+    "NUTRIENT_SERIES_TYPES",
     "SERIES_TYPE_DEFINITIONS",
     "SERIES_TYPE_ID_BY_ENUM",
     "get_series_type_id",

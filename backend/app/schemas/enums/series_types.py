@@ -436,6 +436,12 @@ SERIES_TYPE_ID_BY_ENUM: dict[SeriesType, int] = {enum: type_id for type_id, enum
 SERIES_TYPE_ENUM_BY_ID: dict[int, SeriesType] = {type_id: enum for type_id, enum, _ in SERIES_TYPE_DEFINITIONS}
 SERIES_TYPE_UNIT_BY_ENUM: dict[SeriesType, str] = {enum: unit for _, enum, unit in SERIES_TYPE_DEFINITIONS}
 
+# Food and drink intake. Each sample is an amount consumed, so two logged at the same
+# instant are two entries that both count, not one reading reported twice.
+NUTRIENT_SERIES_TYPES: frozenset[SeriesType] = frozenset(
+    {st for st in SeriesType if st.value.startswith("dietary_")} | {SeriesType.hydration}
+)
+
 # Optional human-readable descriptions surfaced in the coverage matrix (tooltips).
 # Only series types that need a meaningful clarification have an entry here;
 SERIES_TYPE_DESCRIPTION_BY_ENUM: dict[SeriesType, str] = {
